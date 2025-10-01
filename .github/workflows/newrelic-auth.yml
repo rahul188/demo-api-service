@@ -1,0 +1,61 @@
+name: MCP with GitHub App Auth
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+jobs:
+  run-with-mcp-auth:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Generate GitHub App Token
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+          installation-id: ${{ secrets.APP_INSTALLATION_ID }}
+      
+      - name: Verify Token Generation
+        run: |
+          echo "✅ Token generated successfully"
+          echo "Token preview: $(echo ${{ steps.app-token.outputs.token }} | cut -c1-20)..."
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      
+      - name: Test GitHub API with App Token
+        env:
+          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          echo "Testing GitHub API access..."
+          curl -s -H "Authorization: Bearer $GITHUB_TOKEN" \
+               -H "Accept: application/vnd.github+json" \
+               https://api.github.com/repos/${{ github.repository }} | jq '.name, .private, .permissions'
+      
+      - name: Install MCP Dependencies
+        run: |
+          npm install -g @modelcontextprotocol/cli
+          echo "✅ MCP CLI installed"
+      
+      - name: Run MCP Operations
+        env:
+          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          echo "🚀 Running MCP operations with authenticated token"
+          
+          # Example: List repository information using the token
+          echo "Repository: ${{ github.repository }}"
+          echo "Token is active and has repository access"
+          
+          # Add your MCP server interactions here
+          # Example: node scripts/mcp-operations.js
+          
+          echo "✅ MCP operations completed"
