@@ -1,0 +1,218 @@
+name: GitHub MCP Server in Actions
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+jobs:
+  use-github-mcp:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      
+      - name: Generate GitHub App Token
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      
+      # Install MCP SDK
+      - name: Install Dependencies
+        run: |
+          npm install @modelcontextprotocol/sdk
+      
+      # Create MCP client that connects to GitHub MCP server
+      - name: Create MCP Client Script
+        run: |
+          cat > use-github-mcp.mjs << 'EOFSCRIPT'
+          import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+          import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
+          
+          async function main() {
+            const githubToken = process.env.GITHUB_TOKEN;
+            
+            if (!githubToken) {
+              console.error('❌ GITHUB_TOKEN required');
+              process.exit(1);
+            }
+          
+            console.log('🚀 Connecting to GitHub MCP Server via Docker...');
+          
+            // Connect to GitHub MCP server running in Docker
+            const transport = new StdioClientTransport({
+              command: 'docker',
+              args: [
+                'run',
+                '-i',
+                '--rm',
+                '-e',
+                'GITHUB_PERSONAL_ACCESS_TOKEN=' + githubToken,
+                'ghcr.io/github/github-mcp-server'
+              ],
+            });
+          
+            const client = new Client(
+              {
+                name: 'github-actions-client',
+                version: '1.0.0',
+              },
+              {
+                capabilities: {
+                  tools: {},
+                  resources: {}
+                }
+              }
+            );
+          
+            try {
+              await client.connect(transport);
+              console.log('✅ Connected to GitHub MCP Server\n');
+          
+              // List available tools
+              console.log('📋 Available Tools:');
+              const tools = await client.listTools();
+              console.log(`Found ${tools.tools.length} tools\n`);
+              
+              // Show first 10 tools
+              tools.tools.slice(0, 10).forEach(tool => {
+                console.log(`  - ${tool.name}`);
+              });
+              console.log('');
+          
+              // Example 1: Get repository information
+              console.log('🔍 Example 1: Getting repository info...');
+              const repoInfo = await client.callTool({
+                name: 'search_repositories',
+                arguments: {
+                  query: 'repo:' + process.env.GITHUB_REPOSITORY,
+                  perPage: 1
+                }
+              });
+              console.log('Repository:', JSON.stringify(repoInfo, null, 2));
+              console.log('');
+          
+              // Example 2: List issues
+              console.log('🎫 Example 2: Listing issues...');
+              const [owner, repo] = process.env.GITHUB_REPOSITORY.split('/');
+              const issues = await client.callTool({
+                name: 'list_issues',
+                arguments: {
+                  owner: owner,
+                  repo: repo,
+                  state: 'all',
+                  perPage: 5
+                }
+              });
+              console.log('Issues:', JSON.stringify(issues, null, 2));
+              console.log('');
+          
+              // Example 3: Get file contents
+              console.log('📄 Example 3: Getting README...');
+              const fileContents = await client.callTool({
+                name: 'get_file_contents',
+                arguments: {
+                  owner: owner,
+                  repo: repo,
+                  path: 'README.md'
+                }
+              });
+              console.log('File:', JSON.stringify(fileContents, null, 2));
+              console.log('');
+          
+              // Example 4: Search code
+              console.log('🔎 Example 4: Searching code...');
+              const codeSearch = await client.callTool({
+                name: 'search_code',
+                arguments: {
+                  q: 'repo:' + process.env.GITHUB_REPOSITORY + ' TODO',
+                  perPage: 3
+                }
+              });
+              console.log('Code search results:', JSON.stringify(codeSearch, null, 2));
+              console.log('');
+          
+              console.log('✅ All MCP operations completed successfully!');
+          
+            } catch (error) {
+              console.error('❌ Error:', error.message);
+              if (error.stack) {
+                console.error(error.stack);
+              }
+              process.exit(1);
+            } finally {
+              await client.close();
+              console.log('🔌 Disconnected from GitHub MCP Server');
+            }
+          }
+          
+          main().catch(error => {
+            console.error('Fatal error:', error);
+            process.exit(1);
+          });
+          EOFSCRIPT
+      
+      - name: Run GitHub MCP Operations
+        env:
+          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          node use-github-mcp.mjs
+      
+      # Additional example: Create an issue using MCP
+      - name: Create Issue via MCP
+        env:
+          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          cat > create-issue-mcp.mjs << 'EOFSCRIPT'
+          import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+          import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
+          
+          async function createIssue() {
+            const transport = new StdioClientTransport({
+              command: 'docker',
+              args: [
+                'run', '-i', '--rm',
+                '-e', 'GITHUB_PERSONAL_ACCESS_TOKEN=' + process.env.GITHUB_TOKEN,
+                'ghcr.io/github/github-mcp-server'
+              ],
+            });
+          
+            const client = new Client({ name: 'issue-creator', version: '1.0.0' }, { capabilities: {} });
+          
+            try {
+              await client.connect(transport);
+              const [owner, repo] = process.env.GITHUB_REPOSITORY.split('/');
+              
+              const result = await client.callTool({
+                name: 'create_issue',
+                arguments: {
+                  owner: owner,
+                  repo: repo,
+                  title: 'Automated Issue from MCP Server',
+                  body: 'This issue was created using the GitHub MCP Server in GitHub Actions!',
+                  labels: ['automated', 'mcp']
+                }
+              });
+              
+              console.log('✅ Issue created:', JSON.stringify(result, null, 2));
+            } catch (error) {
+              console.error('❌ Failed to create issue:', error.message);
+            } finally {
+              await client.close();
+            }
+          }
+          
+          createIssue();
+          EOFSCRIPT
+          
+          node create-issue-mcp.mjs

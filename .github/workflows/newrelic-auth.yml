@@ -21,16 +21,6 @@ jobs:
           private-key: ${{ secrets.APP_PRIVATE_KEY }}
           installation-id: ${{ secrets.APP_INSTALLATION_ID }}
       
-      - name: Verify Token Generation
-        run: |
-          echo "✅ Token generated successfully"
-          echo "Token preview: $(echo ${{ steps.app-token.outputs.token }} | cut -c1-20)..."
-      
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-      
       - name: Test GitHub API with App Token
         env:
           GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
@@ -38,24 +28,29 @@ jobs:
           echo "Testing GitHub API access..."
           curl -s -H "Authorization: Bearer $GITHUB_TOKEN" \
                -H "Accept: application/vnd.github+json" \
-               https://api.github.com/repos/${{ github.repository }} | jq '.name, .private, .permissions'
+               https://api.github.com/repos/${{ github.repository }} | jq '.name, .private'
       
-      - name: Install MCP Dependencies
-        run: |
-          npm install -g @modelcontextprotocol/cli
-          echo "✅ MCP CLI installed"
-      
-      - name: Run MCP Operations
+      - name: Print Token Info
         env:
           GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
-          echo "🚀 Running MCP operations with authenticated token"
-          
-          # Example: List repository information using the token
+          echo "📝 Token Information:"
+          echo "Token preview: $(echo $GITHUB_TOKEN | cut -c1-20)..."
+          echo "Token length: ${#GITHUB_TOKEN}"
           echo "Repository: ${{ github.repository }}"
-          echo "Token is active and has repository access"
+          echo "Owner: ${GITHUB_REPOSITORY_OWNER}"
+          echo "Repo name: ${GITHUB_REPOSITORY##*/}"
+      
+      - name: Run GitHub MCP Server - List Repository Files
+        env:
+          GITHUB_PERSONAL_ACCESS_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          echo "🚀 Using MCP to list repository files"
           
-          # Add your MCP server interactions here
-          # Example: node scripts/mcp-operations.js
+          echo '{"method":"tools/call","params":{"name":"list_files","arguments":{"owner":"'"${GITHUB_REPOSITORY_OWNER}"'","repo":"'"${GITHUB_REPOSITORY##*/}"'","path":""}}}' | \
+          docker run -i --rm \
+            -e GITHUB_PERSONAL_ACCESS_TOKEN="${GITHUB_PERSONAL_ACCESS_TOKEN}" \
+            -e GITHUB_TOOLSETS="repos" \
+            ghcr.io/github/github-mcp-server
           
-          echo "✅ MCP operations completed"
+          echo "✅ MCP tool executed"
