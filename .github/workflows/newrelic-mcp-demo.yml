@@ -41,7 +41,7 @@ jobs:
           
           # Call MCP server with JSON-RPC format
           response=$(curl -s -X POST \
-            "${{ vars.MCP_SERVER_URL || 'http://your-mcp-server.com/remote/mcp/' }}" \
+            "${{ vars.MCP_SERVER_URL || 'https://92fba88b6b90.ngrok-free.app/remote/mcp/' }}" \
             -H "Content-Type: application/json" \
             -H "Accept: application/json" \
             -H "api-key: ${{ secrets.NEWRELIC_API_KEY }}" \
