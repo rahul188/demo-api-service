@@ -94,12 +94,12 @@ jobs:
             exit 1
           fi
           
-          # Extract key metrics
-          total_repos=$(jq -r '.result.content[0].text | fromjson | .analysis.summary.total_github_repos // 0' mcp-analysis-results.json)
-          apm_gaps=$(jq -r '.result.content[0].text | fromjson | .analysis.summary.repos_missing_apm // 0' mcp-analysis-results.json)
-          browser_gaps=$(jq -r '.result.content[0].text | fromjson | .analysis.summary.repos_missing_browser // 0' mcp-analysis-results.json)
-          change_tracking_gaps=$(jq -r '.result.content[0].text | fromjson | .analysis.summary.repos_missing_change_tracking // 0' mcp-analysis-results.json)
-          issues_created=$(jq -r '.result.content[0].text | fromjson | .github_issues_created // [] | length' mcp-analysis-results.json)
+          # Extract key metrics from structuredContent
+          total_repos=$(jq -r '.result.structuredContent.analysis.summary.total_repos // 0' mcp-analysis-results.json)
+          apm_gaps=$(jq -r '.result.structuredContent.analysis.summary.apm_gaps // 0' mcp-analysis-results.json)
+          browser_gaps=$(jq -r '.result.structuredContent.analysis.summary.browser_gaps // 0' mcp-analysis-results.json)
+          change_tracking_gaps=$(jq -r '.result.structuredContent.analysis.summary.change_tracking_gaps // 0' mcp-analysis-results.json)
+          issues_created=$(jq -r '.result.structuredContent.issue_creation.total_issues_created // 0' mcp-analysis-results.json)
           
           echo ""
           echo "╔═══════════════════════════════════════╗"
@@ -115,7 +115,10 @@ jobs:
           
           # Extract created issues
           echo "🎫 Created GitHub Issues:"
-          jq -r '.result.content[0].text | fromjson | .github_issues_created[]? | "  • Issue #\(.number): \(.title)\n    URL: \(.url)"' mcp-analysis-results.json 2>/dev/null || echo "  (No issues created or unable to parse)"
+          echo ""
+          jq -r '.result.structuredContent.issue_creation.details.apm[]? | "  • APM Issue #\(.issue_number): \(.title)\n    URL: \(.issue_url)"' mcp-analysis-results.json 2>/dev/null
+          jq -r '.result.structuredContent.issue_creation.details.browser[]? | "  • Browser Issue #\(.issue_number): \(.title)\n    URL: \(.issue_url)"' mcp-analysis-results.json 2>/dev/null
+          jq -r '.result.structuredContent.issue_creation.details.change_tracking[]? | "  • Change Tracking Issue #\(.issue_number): \(.title)\n    URL: \(.issue_url)"' mcp-analysis-results.json 2>/dev/null
           
           # Set outputs for next steps
           echo "total_repos=$total_repos" >> $GITHUB_OUTPUT
@@ -131,15 +134,15 @@ jobs:
           echo ""
           
           echo "🔴 APM Monitoring Gaps:"
-          jq -r '.result.content[0].text | fromjson | .analysis.gaps.apm[]? | "  - \(.repo_name) (\(.language // "Unknown"))"' mcp-analysis-results.json 2>/dev/null || echo "  ✅ No APM gaps found"
+          jq -r '.result.structuredContent.analysis.apm.gaps[]? | "  - \(.name) (\(.language // "Unknown"))"' mcp-analysis-results.json 2>/dev/null || echo "  ✅ No APM gaps found"
           echo ""
           
           echo "🌐 Browser Monitoring Gaps:"
-          jq -r '.result.content[0].text | fromjson | .analysis.gaps.browser[]? | "  - \(.repo_name) (\(.has_frontend))"' mcp-analysis-results.json 2>/dev/null || echo "  ✅ No Browser gaps found"
+          jq -r '.result.structuredContent.analysis.browser.gaps[]? | "  - \(.name) (Frontend: \(.is_frontend), Framework: \(.framework // "None"))"' mcp-analysis-results.json 2>/dev/null || echo "  ✅ No Browser gaps found"
           echo ""
           
           echo "🔄 Change Tracking Gaps:"
-          jq -r '.result.content[0].text | fromjson | .analysis.gaps.change_tracking[]? | "  - \(.repo_name) (CI/CD: \(.has_cicd))"' mcp-analysis-results.json 2>/dev/null || echo "  ✅ No Change Tracking gaps found"
+          jq -r '.result.structuredContent.analysis.change_tracking.gaps[]? | "  - \(.name) (Reason: \(.reason))"' mcp-analysis-results.json 2>/dev/null || echo "  ✅ No Change Tracking gaps found"
 
       # Step 5: Upload results as artifact
       - name: 📤 Upload Analysis Results
@@ -159,19 +162,23 @@ jobs:
             const fs = require('fs');
             const results = JSON.parse(fs.readFileSync('mcp-analysis-results.json', 'utf8'));
             
-            // Parse MCP response
-            let analysis = null;
-            if (results.result?.content?.[0]?.text) {
-              analysis = JSON.parse(results.result.content[0].text).analysis;
-            }
+            // Parse MCP response from structuredContent
+            const data = results.result?.structuredContent;
             
-            if (!analysis) {
+            if (!data || !data.analysis) {
               console.log('⚠️ Could not parse analysis results');
               return;
             }
             
-            const summary = analysis.summary || {};
-            const issues = results.result?.content?.[0] ? JSON.parse(results.result.content[0].text).github_issues_created : [];
+            const summary = data.analysis.summary || {};
+            const issueDetails = data.issue_creation?.details || {};
+            
+            // Collect all created issues
+            const allIssues = [
+              ...(issueDetails.apm || []),
+              ...(issueDetails.browser || []),
+              ...(issueDetails.change_tracking || [])
+            ];
             
             // Build comment
             let comment = `## 🔍 New Relic Gap Analysis Results\n\n`;
@@ -179,15 +186,15 @@ jobs:
             comment += `**Organization:** ${context.repo.owner}\n\n`;
             
             comment += `### 📊 Summary\n`;
-            comment += `- **Total Repositories:** ${summary.total_github_repos || 0}\n`;
-            comment += `- **APM Gaps:** ${summary.repos_missing_apm || 0}\n`;
-            comment += `- **Browser Gaps:** ${summary.repos_missing_browser || 0}\n`;
-            comment += `- **Change Tracking Gaps:** ${summary.repos_missing_change_tracking || 0}\n\n`;
+            comment += `- **Total Repositories:** ${summary.total_repos || 0}\n`;
+            comment += `- **APM Gaps:** ${summary.apm_gaps || 0}\n`;
+            comment += `- **Browser Gaps:** ${summary.browser_gaps || 0}\n`;
+            comment += `- **Change Tracking Gaps:** ${summary.change_tracking_gaps || 0}\n\n`;
             
-            if (issues && issues.length > 0) {
+            if (allIssues && allIssues.length > 0) {
               comment += `### 🎫 Created Issues\n`;
-              issues.forEach(issue => {
-                comment += `- #${issue.number}: ${issue.title}\n`;
+              allIssues.forEach(issue => {
+                comment += `- [#${issue.issue_number}](${issue.issue_url}): ${issue.title}\n`;
               });
               comment += `\n`;
               comment += `> 🤖 **GitHub Copilot** has been assigned to help implement these monitoring improvements.\n\n`;
