@@ -1,0 +1,242 @@
+name: New Relic MCP Gap Analysis - Demo
+
+# 🎯 Triggers: Release events or manual testing
+on:
+  release:
+    types: [published, created]
+  workflow_dispatch:
+    inputs:
+      account_id:
+        description: 'New Relic Account ID'
+        required: false
+        default: '3635617'
+      days_back:
+        description: 'Days of history to analyze'
+        required: false
+        default: '30'
+
+jobs:
+  analyze-and-create-issues:
+    name: 🔍 Analyze Gaps & Create GitHub Issues
+    runs-on: ubuntu-latest
+    
+    steps:
+      # Step 1: Generate GitHub App Token for issue creation
+      - name: 🔐 Generate GitHub App Token
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+
+      # Step 2: Run New Relic Gap Analysis via MCP Server
+      - name: 🔍 Analyze New Relic Monitoring Gaps
+        id: gap-analysis
+        run: |
+          echo "🚀 Starting Gap Analysis..."
+          echo "📦 Repository: ${{ github.repository }}"
+          echo "🏢 Organization: ${{ github.repository_owner }}"
+          echo "🆔 Account ID: ${{ github.event.inputs.account_id || vars.NEWRELIC_ACCOUNT_ID || '3635617' }}"
+          echo ""
+          
+          # Call MCP server with JSON-RPC format
+          response=$(curl -s -X POST \
+            "${{ vars.MCP_SERVER_URL || 'http://your-mcp-server.com/remote/mcp/' }}" \
+            -H "Content-Type: application/json" \
+            -H "Accept: application/json" \
+            -H "api-key: ${{ secrets.NEWRELIC_API_KEY }}" \
+            -H "github-token: ${{ steps.app-token.outputs.token }}" \
+            -d '{
+              "jsonrpc": "2.0",
+              "id": "gap-analysis-${{ github.run_id }}",
+              "method": "tools/call",
+              "params": {
+                "name": "analyze_github_newrelic_gaps",
+                "arguments": {
+                  "account_id": "${{ github.event.inputs.account_id || vars.NEWRELIC_ACCOUNT_ID || '3635617' }}",
+                  "github_org": "${{ github.repository_owner }}",
+                  "days_back": ${{ github.event.inputs.days_back || 30 }},
+                  "create_issues": true,
+                  "assign_copilot": true
+                }
+              }
+            }')
+          
+          # Save response for later steps
+          echo "$response" > mcp-analysis-results.json
+          
+          echo ""
+          echo "📥 Gap Analysis Response:"
+          echo "$response" | jq '.' 2>/dev/null || echo "$response"
+
+      # Step 3: Parse and display results
+      - name: 📊 Parse Results
+        id: parse-results
+        run: |
+          echo "📊 Processing Gap Analysis Results..."
+          
+          if ! jq empty mcp-analysis-results.json 2>/dev/null; then
+            echo "❌ Invalid JSON response"
+            cat mcp-analysis-results.json
+            exit 1
+          fi
+          
+          # Extract key metrics
+          total_repos=$(jq -r '.result.content[0].text | fromjson | .analysis.summary.total_github_repos // 0' mcp-analysis-results.json)
+          apm_gaps=$(jq -r '.result.content[0].text | fromjson | .analysis.summary.repos_missing_apm // 0' mcp-analysis-results.json)
+          browser_gaps=$(jq -r '.result.content[0].text | fromjson | .analysis.summary.repos_missing_browser // 0' mcp-analysis-results.json)
+          change_tracking_gaps=$(jq -r '.result.content[0].text | fromjson | .analysis.summary.repos_missing_change_tracking // 0' mcp-analysis-results.json)
+          issues_created=$(jq -r '.result.content[0].text | fromjson | .github_issues_created // [] | length' mcp-analysis-results.json)
+          
+          echo ""
+          echo "╔═══════════════════════════════════════╗"
+          echo "║    📊 GAP ANALYSIS SUMMARY            ║"
+          echo "╠═══════════════════════════════════════╣"
+          echo "║ Total Repositories: $total_repos"
+          echo "║ APM Gaps Found: $apm_gaps"
+          echo "║ Browser Gaps Found: $browser_gaps"
+          echo "║ Change Tracking Gaps: $change_tracking_gaps"
+          echo "║ GitHub Issues Created: $issues_created"
+          echo "╚═══════════════════════════════════════╝"
+          echo ""
+          
+          # Extract created issues
+          echo "🎫 Created GitHub Issues:"
+          jq -r '.result.content[0].text | fromjson | .github_issues_created[]? | "  • Issue #\(.number): \(.title)\n    URL: \(.url)"' mcp-analysis-results.json 2>/dev/null || echo "  (No issues created or unable to parse)"
+          
+          # Set outputs for next steps
+          echo "total_repos=$total_repos" >> $GITHUB_OUTPUT
+          echo "issues_created=$issues_created" >> $GITHUB_OUTPUT
+          echo "apm_gaps=$apm_gaps" >> $GITHUB_OUTPUT
+          echo "browser_gaps=$browser_gaps" >> $GITHUB_OUTPUT
+          echo "change_tracking_gaps=$change_tracking_gaps" >> $GITHUB_OUTPUT
+
+      # Step 4: Display detailed gap information
+      - name: 📋 Show Detailed Gaps
+        run: |
+          echo "📋 Detailed Gap Analysis:"
+          echo ""
+          
+          echo "🔴 APM Monitoring Gaps:"
+          jq -r '.result.content[0].text | fromjson | .analysis.gaps.apm[]? | "  - \(.repo_name) (\(.language // "Unknown"))"' mcp-analysis-results.json 2>/dev/null || echo "  ✅ No APM gaps found"
+          echo ""
+          
+          echo "🌐 Browser Monitoring Gaps:"
+          jq -r '.result.content[0].text | fromjson | .analysis.gaps.browser[]? | "  - \(.repo_name) (\(.has_frontend))"' mcp-analysis-results.json 2>/dev/null || echo "  ✅ No Browser gaps found"
+          echo ""
+          
+          echo "🔄 Change Tracking Gaps:"
+          jq -r '.result.content[0].text | fromjson | .analysis.gaps.change_tracking[]? | "  - \(.repo_name) (CI/CD: \(.has_cicd))"' mcp-analysis-results.json 2>/dev/null || echo "  ✅ No Change Tracking gaps found"
+
+      # Step 5: Upload results as artifact
+      - name: 📤 Upload Analysis Results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gap-analysis-results-${{ github.run_number }}
+          path: mcp-analysis-results.json
+          retention-days: 30
+
+      # Step 6: Comment on Release (if triggered by release)
+      - name: 💬 Comment on Release
+        if: github.event_name == 'release'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ steps.app-token.outputs.token }}
+          script: |
+            const fs = require('fs');
+            const results = JSON.parse(fs.readFileSync('mcp-analysis-results.json', 'utf8'));
+            
+            // Parse MCP response
+            let analysis = null;
+            if (results.result?.content?.[0]?.text) {
+              analysis = JSON.parse(results.result.content[0].text).analysis;
+            }
+            
+            if (!analysis) {
+              console.log('⚠️ Could not parse analysis results');
+              return;
+            }
+            
+            const summary = analysis.summary || {};
+            const issues = results.result?.content?.[0] ? JSON.parse(results.result.content[0].text).github_issues_created : [];
+            
+            // Build comment
+            let comment = `## 🔍 New Relic Gap Analysis Results\n\n`;
+            comment += `**Triggered by:** Release ${context.payload.release.tag_name}\n`;
+            comment += `**Organization:** ${context.repo.owner}\n\n`;
+            
+            comment += `### 📊 Summary\n`;
+            comment += `- **Total Repositories:** ${summary.total_github_repos || 0}\n`;
+            comment += `- **APM Gaps:** ${summary.repos_missing_apm || 0}\n`;
+            comment += `- **Browser Gaps:** ${summary.repos_missing_browser || 0}\n`;
+            comment += `- **Change Tracking Gaps:** ${summary.repos_missing_change_tracking || 0}\n\n`;
+            
+            if (issues && issues.length > 0) {
+              comment += `### 🎫 Created Issues\n`;
+              issues.forEach(issue => {
+                comment += `- #${issue.number}: ${issue.title}\n`;
+              });
+              comment += `\n`;
+              comment += `> 🤖 **GitHub Copilot** has been assigned to help implement these monitoring improvements.\n\n`;
+            } else {
+              comment += `✅ **No gaps found!** All repositories have comprehensive New Relic monitoring.\n\n`;
+            }
+            
+            comment += `---\n`;
+            comment += `📥 [View detailed results](${context.payload.repository.html_url}/actions/runs/${context.runId})\n`;
+            comment += `*Analysis completed at ${new Date().toISOString()}*`;
+            
+            // Post comment
+            await github.rest.repos.createReleaseComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              release_id: context.payload.release.id,
+              body: comment
+            });
+
+      # Step 7: Create workflow summary
+      - name: 📝 Generate Workflow Summary
+        if: always()
+        run: |
+          cat >> $GITHUB_STEP_SUMMARY << 'EOF'
+          # 🔍 New Relic MCP Gap Analysis
+          
+          ## 📊 Results Summary
+          
+          | Metric | Count |
+          |--------|-------|
+          | Total Repositories | ${{ steps.parse-results.outputs.total_repos }} |
+          | APM Gaps | ${{ steps.parse-results.outputs.apm_gaps }} |
+          | Browser Gaps | ${{ steps.parse-results.outputs.browser_gaps }} |
+          | Change Tracking Gaps | ${{ steps.parse-results.outputs.change_tracking_gaps }} |
+          | **Issues Created** | **${{ steps.parse-results.outputs.issues_created }}** |
+          
+          ## 🎯 What Happened?
+          
+          1. ✅ Analyzed all repositories in **${{ github.repository_owner }}**
+          2. ✅ Compared with New Relic entities in account **${{ github.event.inputs.account_id || vars.NEWRELIC_ACCOUNT_ID }}**
+          3. ✅ Identified monitoring gaps across APM, Browser, and Change Tracking
+          4. ✅ Automatically created GitHub issues for each gap
+          5. ✅ Assigned **GitHub Copilot** to help implement fixes
+          
+          ## 🚀 Next Steps
+          
+          - Review the created issues in the [Issues tab](/${{ github.repository }}/issues)
+          - GitHub Copilot will provide implementation guidance
+          - Monitor the progress as teams add New Relic instrumentation
+          
+          ---
+          *Powered by New Relic MCP Server*
+          EOF
+
+      # Step 8: Notify on failure
+      - name: ❌ Notify on Failure
+        if: failure()
+        run: |
+          echo "::error::Gap analysis workflow failed. Check the logs for details."
+          echo "Common issues:"
+          echo "  - MCP server not reachable at: ${{ vars.MCP_SERVER_URL }}"
+          echo "  - Invalid New Relic API key"
+          echo "  - GitHub App authentication issues"
+          echo "  - Missing required secrets or variables"
