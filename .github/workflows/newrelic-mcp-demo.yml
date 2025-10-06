@@ -56,7 +56,7 @@ jobs:
           response=$(curl -s -X POST \
             "${{ vars.MCP_SERVER_URL || 'https://92fba88b6b90.ngrok-free.app/remote/mcp/' }}" \
             -H "Content-Type: application/json" \
-            -H "Accept: application/json" \
+            -H "Accept: application/json, text/event-stream" \
             -H "api-key: ${{ secrets.NEWRELIC_API_KEY }}" \
             -H "github-installation-id: ${{ steps.get-installation-id.outputs.installation_id }}" \
             -d '{
