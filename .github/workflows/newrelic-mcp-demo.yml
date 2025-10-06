@@ -70,7 +70,7 @@ jobs:
                   "github_org": "${{ github.repository_owner }}",
                   "days_back": ${{ github.event.inputs.days_back || 30 }},
                   "create_issues": true,
-                  "assign_copilot": true
+                  "assign_to_copilot": true
                 }
               }
             }')
