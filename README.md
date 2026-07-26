@@ -9,7 +9,7 @@ A sample Python Flask API service for demonstrating APM monitoring.
 - `/api/health` - Health check
 
 ## Tech Stack
-- Python 3.9
+- Python 3.10
 - Flask
 - SQLAlchemy
 - Redis
