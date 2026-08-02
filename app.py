@@ -278,6 +278,34 @@ def slow_endpoint():
     time.sleep(random.uniform(2, 5))
     return jsonify({'message': 'This was a slow operation', 'duration': '2-5 seconds'})
 
+@app.route('/api/status')
+def service_status():
+    """Get basic service status"""
+    return jsonify({
+        'service': 'demo-api-service',
+        'environment': os.getenv('FLASK_ENV', 'development'),
+        'uptime_hint': 'service is running'
+    })
+
+@app.route('/api/time')
+def get_server_time():
+    """Get server time details"""
+    now = datetime.utcnow()
+    return jsonify({
+        'utc_time': now.isoformat(),
+        'weekday': now.strftime('%A')
+    })
+
+@app.route('/api/random-tip')
+def random_tip():
+    """Get a random API usage tip"""
+    tips = [
+        'Use query parameters to filter user and product responses.',
+        'Check /api/health before load testing the service.',
+        'Use /api/analytics to monitor basic service usage.'
+    ]
+    return jsonify({'tip': random.choice(tips)})
+
 @app.errorhandler(404)
 def not_found(error):
     return jsonify({'error': 'Endpoint not found'}), 404

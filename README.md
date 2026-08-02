@@ -7,6 +7,9 @@ A sample Python Flask API service for demonstrating APM monitoring.
 - `/api/products` - Product catalog
 - `/api/orders` - Order processing
 - `/api/health` - Health check
+- `/api/status` - Service status metadata
+- `/api/time` - Server UTC time details
+- `/api/random-tip` - Random API usage tip
 
 ## Tech Stack
 - Python 3.10
